@@ -1,3 +1,7 @@
+# jstable 1.3.23
+* Fix: `svyregress.display` no longer errors when `pcut.univariate` selects a single variable (prevents dimension dropping).
+* Fix: `svycox.display` now preserves matrix dimensions when subsetting to a single selected term with `pcut.univariate`.
+
 # jstable 1.3.22
 * Fix: `CreateTableOneJS` and `CreateTableOne2` now have correct headers for overall and strata columns.
 
