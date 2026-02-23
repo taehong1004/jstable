@@ -1,3 +1,6 @@
+# jstable 1.3.24
+* Fix: `.display` functions (`cox2.display`, `svycox.display`, `svyregress.display`, `geeglm.display`, `lmer.display`) now correctly handle and format models containing interaction terms (e.g., `a*b` or `a:b`) without throwing dimension dropping or row matching errors.
+
 # jstable 1.3.23
 * Fix: `svyregress.display` no longer errors when `pcut.univariate` selects a single variable (prevents dimension dropping).
 * Fix: `svycox.display` now preserves matrix dimensions when subsetting to a single selected term with `pcut.univariate`.

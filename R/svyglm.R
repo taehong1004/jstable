@@ -28,7 +28,12 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
   gaussianT <- ifelse(length(grep("gaussian", model$family)) == 1, T, F)
   
   model_data <- model.frame(model)
-  categorical_vars <- xs[sapply(model_data[xs], function(x) is.factor(x) | is.character(x))]
+  base_vars <- xs[!grepl(":", xs) & xs %in% names(model_data)]
+  if (length(base_vars) > 0) {
+    categorical_vars <- base_vars[sapply(model_data[, base_vars, drop = FALSE], function(x) is.factor(x) | is.character(x))]
+  } else {
+    categorical_vars <- character(0)
+  }
   
   
 
@@ -82,7 +87,8 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
         mul.res <- t(rbind(mul.summ, ifelse(mul[, 4] <= 0.001, "< 0.001", as.character(round(mul[, 4], decimal + 1)))))
         colnames(mul.res) <- c(paste("adj. coeff.(", 100 - 100 * 0.05, "%CI)", sep = ""), "adj. P value")
       }else{
-        significant_vars <- rownames(uni)[as.numeric(uni[, 4]) < pcut.univariate]
+        significant_coefs <- rownames(uni)[as.numeric(uni[, 4]) < pcut.univariate]
+        terms_to_include <- character(0)
         
         if (length(categorical_vars) != 0){
           factor_vars_list <- lapply(categorical_vars, function(factor_var) {
@@ -101,12 +107,41 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
             p_values <- uni[variables, 4]
             
             if (any(p_values < pcut.univariate, na.rm = TRUE)) {
-              significant_vars <- setdiff(significant_vars, variables)
-              
-              significant_vars <- unique(c(significant_vars, key))
+              terms_to_include <- unique(c(terms_to_include, key))
             }
           }
         }
+        
+        for (term in xs) {
+          if (grepl(":", term)) {
+            interaction_parts <- strsplit(term, ":")[[1]]
+            interaction_coefs <- rownames(uni)[grepl(term, rownames(uni), fixed = TRUE)]
+            
+            if (length(interaction_coefs) == 0) {
+              interaction_mask <- rep(TRUE, nrow(uni))
+              for (part in interaction_parts) {
+                interaction_mask <- interaction_mask & grepl(part, rownames(uni), fixed = TRUE)
+              }
+              interaction_mask <- interaction_mask & grepl(":", rownames(uni), fixed = TRUE)
+              interaction_coefs <- rownames(uni)[interaction_mask]
+            }
+            
+            if (length(interaction_coefs) > 0) {
+              p_values <- uni[interaction_coefs, 4]
+              
+              if (any(as.numeric(p_values) < pcut.univariate, na.rm = TRUE)) {
+                main_effects <- strsplit(term, ":")[[1]]
+                terms_to_include <- unique(c(terms_to_include, main_effects, term))
+              }
+            }
+          } else if (!(term %in% categorical_vars)) {
+            if (term %in% significant_coefs) {
+              terms_to_include <- unique(c(terms_to_include, term))
+            }
+          }
+        }
+        
+        significant_vars <- xs[xs %in% terms_to_include]
         
         if (length(significant_vars) == 0 ){
           
@@ -150,7 +185,8 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
         mul.res <- t(rbind(mul.summ, ifelse(mul[, 4] <= 0.001, "< 0.001", as.character(round(mul[, 4], decimal + 1)))))
         colnames(mul.res) <- c(paste("adj. OR.(", 100 - 100 * 0.05, "%CI)", sep = ""), "adj. P value")
       }else{
-        significant_vars <- rownames(uni)[as.numeric(uni[, 4]) < pcut.univariate]
+        significant_coefs <- rownames(uni)[as.numeric(uni[, 4]) < pcut.univariate]
+        terms_to_include <- character(0)
         
         if (length(categorical_vars) != 0){
           factor_vars_list <- lapply(categorical_vars, function(factor_var) {
@@ -169,12 +205,41 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
             p_values <- uni[variables, 4]
             
             if (any(p_values < pcut.univariate, na.rm = TRUE)) {
-              significant_vars <- setdiff(significant_vars, variables)
-              
-              significant_vars <- unique(c(significant_vars, key))
+              terms_to_include <- unique(c(terms_to_include, key))
             }
           }
         }
+        
+        for (term in xs) {
+          if (grepl(":", term)) {
+            interaction_parts <- strsplit(term, ":")[[1]]
+            interaction_coefs <- rownames(uni)[grepl(term, rownames(uni), fixed = TRUE)]
+            
+            if (length(interaction_coefs) == 0) {
+              interaction_mask <- rep(TRUE, nrow(uni))
+              for (part in interaction_parts) {
+                interaction_mask <- interaction_mask & grepl(part, rownames(uni), fixed = TRUE)
+              }
+              interaction_mask <- interaction_mask & grepl(":", rownames(uni), fixed = TRUE)
+              interaction_coefs <- rownames(uni)[interaction_mask]
+            }
+            
+            if (length(interaction_coefs) > 0) {
+              p_values <- uni[interaction_coefs, 4]
+              
+              if (any(as.numeric(p_values) < pcut.univariate, na.rm = TRUE)) {
+                main_effects <- strsplit(term, ":")[[1]]
+                terms_to_include <- unique(c(terms_to_include, main_effects, term))
+              }
+            }
+          } else if (!(term %in% categorical_vars)) {
+            if (term %in% significant_coefs) {
+              terms_to_include <- unique(c(terms_to_include, term))
+            }
+          }
+        }
+        
+        significant_vars <- xs[xs %in% terms_to_include]
         
         if (length(significant_vars) == 0 ){
           mul.res <- matrix(NA, nrow = nrow(uni.res), ncol = 2)
@@ -236,18 +301,35 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
     rn.list[[x]] <<- paste(xs[x], ": ", model$xlevels[[xs[x]]][2], " vs ", model$xlevels[[xs[x]]][1], sep = "")
   })
   lapply(varnum.mfac, function(x) {
-    if (grepl(":", xs[x])) {
-      a <- unlist(strsplit(xs[x], ":"))[1]
-      b <- unlist(strsplit(xs[x], ":"))[2]
-
-      if (a %in% xs && b %in% xs) {
-        ref <- paste0(a, model$xlevels[[a]][1], ":", b, model$xlevels[[b]][1])
-        rn.list[[x]] <<- c(paste(xs[x], ": ref.=", ref, sep = ""), gsub(xs[x], "   ", rn.list[[x]]))
+    var_name <- xs[x]
+    if (grepl(":", var_name)) {
+      components <- unlist(strsplit(var_name, ":"))
+      are_all_factors <- all(sapply(components, function(comp) comp %in% names(model$xlevels)))
+      
+      if (are_all_factors) {
+        ref <- paste(sapply(components, function(comp) model$xlevels[[comp]][1]), collapse = ":")
+        rn.list[[x]] <<- c(paste(var_name, ": ref.=", ref, sep = ""), gsub(var_name, "   ", rn.list[[x]]))
       } else {
-        rn.list[[x]] <<- c(paste(xs[x], ": ref.=NA", sep = ""), gsub(xs[x], "   ", rn.list[[x]]))
+        factor_comp <- components[components %in% names(model$xlevels)]
+        if (length(factor_comp) > 0) {
+          multi_level_factors <- factor_comp[sapply(factor_comp, function(f) length(model$xlevels[[f]]) > 2)]
+          if (length(multi_level_factors) > 0) {
+            ref_levels <- sapply(multi_level_factors, function(f) model$xlevels[[f]][1])
+            ref_string <- paste(ref_levels, collapse = ",")
+            rn.list[[x]] <<- c(paste(var_name, ": ref.=", ref_string, sep = ""), gsub(var_name, "   ", rn.list[[x]]))
+          } else {
+            rn.list[[x]] <<- c(var_name, gsub(var_name, "   ", rn.list[[x]]))
+          }
+        } else {
+          rn.list[[x]] <<- c(var_name, gsub(var_name, "   ", rn.list[[x]]))
+        }
       }
     } else {
-      rn.list[[x]] <<- c(paste(xs[x], ": ref.=", model$xlevels[[xs[x]]][1], sep = ""), gsub(xs[x], "   ", rn.list[[x]]))
+      if (var_name %in% names(model$xlevels)) {
+        rn.list[[x]] <<- c(paste(var_name, ": ref.=", model$xlevels[[var_name]][1], sep = ""), gsub(var_name, "   ", rn.list[[x]]))
+      } else {
+        rn.list[[x]] <<- c(var_name, gsub(var_name, "   ", rn.list[[x]]))
+      }
     }
     # rn.list[[x]] <<- c(paste(xs[x], ": ref.=", model$xlevels[[xs[x]]][1], sep = ""), gsub(xs[x], "   ", rn.list[[x]]))
   })
@@ -289,4 +371,3 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
   class(results) <- c("display", "list")
   return(results)
 }
-
