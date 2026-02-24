@@ -51,7 +51,7 @@ lmerExp <- function(lmer.coef, family = "binomial", dec) {
 #' @rdname lmer.display
 #' @export
 #' @importFrom lme4 lmer glmer confint.merMod
-#' @importFrom stats update formula reformulate
+#' @importFrom stats update formula reformulate terms getCall
 
 lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = NULL, data_for_univariate = NULL) {
   xvar <- NULL
@@ -63,9 +63,21 @@ lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = N
   y <- forms[2]
   xfr <- strsplit(forms[3], " \\+ ")[[1]]
   xr <- xfr[grepl("\\|", xfr)]
-  xf <- attr(stats::terms(lmerMod.obj), "term.labels")
+  terms_obj <- stats::terms(lmerMod.obj)
+  xf <- attr(terms_obj, "term.labels")
+  offset_idx <- attr(terms_obj, "specials")$offset
+  offset_terms <- if (!is.null(offset_idx) && length(offset_idx) > 0) {
+    xf[offset_idx]
+  } else {
+    character(0)
+  }
+  if (length(offset_terms) == 0) {
+    offset_terms <- xf[grepl("^offset\\(", xf)]
+  }
+  xf <- setdiff(xf, offset_terms)
   family.lmer <- ifelse(is.null(sl$family), "gaussian", sl$family)
   uni.res <- ""
+  current_offset <- stats::getCall(lmerMod.obj)$offset
   
   base_vars <- xf[!grepl(":", xf) & xf %in% names(mdata)]
   if (length(base_vars) > 0) {
@@ -74,7 +86,15 @@ lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = N
     categorical_vars <- character(0)
   }
   if (is.null(data_for_univariate)) {
-    basemodel <- update(lmerMod.obj, stats::formula(paste(c(". ~ .", xf), collapse = " - ")), data = mdata)
+    update_args <- list(
+      object = lmerMod.obj,
+      formula = stats::formula(paste(c(". ~ .", xf), collapse = " - ")),
+      data = mdata
+    )
+    if (!is.null(current_offset)) {
+      update_args$offset <- current_offset
+    }
+    basemodel <- do.call(stats::update, update_args)
     unis <- lapply(xf, function(x) {
       summary(stats::update(basemodel, stats::formula(paste0(". ~ . +", x)), data = mdata))$coefficients
     })
@@ -86,6 +106,9 @@ lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = N
       random_part <- if (length(xr) > 0) paste(xr, collapse = "+") else ""
       unis <- lapply(xf, function(v) {
         terms <- if (length(xr) > 0) c(v, xr) else xr
+        if (length(offset_terms) > 0) {
+          terms <- c(terms, offset_terms)
+        }
         f_uni <- stats::reformulate(termlabels = terms, response = y)
         needed_vars <- all.vars(f_uni)
         keep <- complete.cases(data_for_univariate[, needed_vars, drop = F]) 
@@ -93,7 +116,11 @@ lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = N
           coef_ncol <- ncol(fixef)  
           return(matrix(nrow = 0, ncol = coef_ncol))
         } 
-        uni_mod <- update(lmerMod.obj, f_uni, data = data_for_univariate[keep, , drop = F])
+        update_args <- list(object = lmerMod.obj, formula = f_uni, data = data_for_univariate[keep, , drop = F])
+        if (!is.null(current_offset)) {
+          update_args$offset <- current_offset
+        }
+        uni_mod <- do.call(stats::update, update_args)
         
         summary(uni_mod)$coefficients
       })
@@ -195,7 +222,11 @@ lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = N
         
       }else{
         
-        selected_formula <- as.formula(paste(y, "~", paste(significant_vars, collapse = " + "),"+", paste(xr,collapse = "+")))
+        selected_rhs <- c(significant_vars, xr)
+        if (length(offset_terms) > 0) {
+          selected_rhs <- c(selected_rhs, offset_terms)
+        }
+        selected_formula <- as.formula(paste(y, "~", paste(selected_rhs, collapse = " + ")))
         
         # Use data_for_univariate if provided, otherwise use mdata
         if (!is.null(data_for_univariate)) {
@@ -203,10 +234,14 @@ lmer.display <- function(lmerMod.obj, dec = 2, ci.ranef = F, pcut.univariate = N
           needed_vars <- all.vars(selected_formula)
           idx_multi <- complete.cases(data_for_univariate[, needed_vars, drop = F])
           df_multi <- data_for_univariate[idx_multi, ]
-          selected_model <- lme4::lmer(selected_formula, data = df_multi)
+          update_args <- list(object = lmerMod.obj, formula = selected_formula, data = df_multi)
         } else {
-          selected_model <- lme4::lmer(selected_formula, data = mdata)
+          update_args <- list(object = lmerMod.obj, formula = selected_formula, data = mdata)
         }
+        if (!is.null(current_offset)) {
+          update_args$offset <- current_offset
+        }
+        selected_model <- do.call(stats::update, update_args)
         
         selected_summary <- summary(selected_model)
         mul<-selected_summary$coefficients[-1,,drop = F]

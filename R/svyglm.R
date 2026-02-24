@@ -17,15 +17,27 @@
 #' @rdname svyglm.display
 #' @export
 #' @importFrom survey svyglm
-#' @importFrom stats update confint
+#' @importFrom stats update confint terms getCall
 
 
 svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) {
   model <- svyglm.obj
   design.model <- model$survey.design
-  xs <- attr(model$terms, "term.labels")
+  terms_obj <- stats::terms(model)
+  xs <- attr(terms_obj, "term.labels")
+  offset_idx <- attr(terms_obj, "specials")$offset
+  offset_terms <- if (!is.null(offset_idx) && length(offset_idx) > 0) {
+    xs[offset_idx]
+  } else {
+    character(0)
+  }
+  if (length(offset_terms) == 0) {
+    offset_terms <- xs[grepl("^offset\\(", xs)]
+  }
+  xs <- setdiff(xs, offset_terms)
   y <- names(model$model)[1]
   gaussianT <- ifelse(length(grep("gaussian", model$family)) == 1, T, F)
+  current_offset <- stats::getCall(model)$offset
   
   model_data <- model.frame(model)
   base_vars <- xs[!grepl(":", xs) & xs %in% names(model_data)]
@@ -55,9 +67,19 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
     rownames(uni.res) <- rownames(uni)
     res <- uni.res
   } else {
+    update_args <- list(
+      object = model,
+      formula = stats::formula(paste(c(". ~ .", xs), collapse = " - ")),
+      design = design.model
+    )
+    if (!is.null(current_offset)) {
+      update_args$offset <- current_offset
+    }
+    basemodel <- do.call(stats::update, update_args)
     uni <- lapply(xs, function(v) {
-      coef.df <- data.frame(coefNA(stats::update(model, formula(paste(paste(c(". ~ .", xs), collapse = " - "), " + ", v)), design = design.model)))[-1, ]
-      confint.df <- data.frame(stats::confint(stats::update(model, formula(paste(paste(c(". ~ .", xs), collapse = " - "), " + ", v)), design = design.model)))[-1, ]
+      uni_model <- stats::update(basemodel, stats::formula(paste0(". ~ . +", v)), design = design.model)
+      coef.df <- data.frame(coefNA(uni_model))[-1, ]
+      confint.df <- data.frame(stats::confint(uni_model))[-1, ]
 
       conf.df <- data.frame(matrix(nrow = nrow(coef.df), ncol = 2))
       rownames(conf.df) <- rownames(coef.df)
@@ -150,8 +172,16 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
           rownames(mul.res) <- rownames(uni.res)
           
         }else{
-          selected_formula <- as.formula(paste(y, "~", paste(significant_vars, collapse = " + ")))
-          selected_model <- survey::svyglm(selected_formula, design = design.model ) 
+          selected_rhs <- significant_vars
+          if (length(offset_terms) > 0) {
+            selected_rhs <- c(selected_rhs, offset_terms)
+          }
+          selected_formula <- as.formula(paste(y, "~", paste(selected_rhs, collapse = " + ")))
+          glm_args <- list(formula = selected_formula, design = design.model, family = model$family)
+          if (!is.null(current_offset)) {
+            glm_args$offset <- current_offset
+          }
+          selected_model <- do.call(survey::svyglm, glm_args)
           mul <- cbind(coefNA(selected_model)[-1, , drop = FALSE], stats::confint(selected_model)[-1, , drop = FALSE])
           mul.summ <- paste(round(mul[, 1], decimal), " (", round(mul[, 5], decimal), ",", round(mul[, 6], decimal), ")", sep = "")
           mul.res1 <- t(rbind(mul.summ, ifelse(mul[, 4] <= 0.001, "< 0.001", as.character(round(mul[, 4], decimal + 1)))))
@@ -247,8 +277,16 @@ svyregress.display <- function(svyglm.obj, decimal = 2, pcut.univariate = NULL) 
           rownames(mul.res) <- rownames(uni.res)
           
         }else{
-          selected_formula <- as.formula(paste(y, "~", paste(significant_vars, collapse = " + ")))
-          selected_model <- survey::svyglm(selected_formula, design = design.model ) 
+          selected_rhs <- significant_vars
+          if (length(offset_terms) > 0) {
+            selected_rhs <- c(selected_rhs, offset_terms)
+          }
+          selected_formula <- as.formula(paste(y, "~", paste(selected_rhs, collapse = " + ")))
+          glm_args <- list(formula = selected_formula, design = design.model, family = model$family)
+          if (!is.null(current_offset)) {
+            glm_args$offset <- current_offset
+          }
+          selected_model <- do.call(survey::svyglm, glm_args)
           mul <- cbind(coefNA(selected_model)[-1, , drop = FALSE], stats::confint(selected_model)[-1, , drop = FALSE])
           mul.summ <- paste(round(exp(mul[, 1]), decimal), " (", round(exp(mul[, 5]), decimal), ",", round(exp(mul[, 6]), decimal), ")", sep = "")
           mul.res1 <- t(rbind(mul.summ, ifelse(mul[, 4] <= 0.001, "< 0.001", as.character(round(mul[, 4], decimal + 1)))))
