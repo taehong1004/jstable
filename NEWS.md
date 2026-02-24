@@ -1,5 +1,6 @@
 # jstable 1.3.24
-* Fix: `.display` functions (`cox2.display`, `svycox.display`, `svyregress.display`, `geeglm.display`, `lmer.display`) now correctly handle and format models containing interaction terms (e.g., `a*b` or `a:b`) without throwing dimension dropping or row matching errors.
+* **Fix:** `.display` functions (`cox2.display`, `svycox.display`, `svyregress.display`, `geeglm.display`, `lmer.display`) now correctly handle models with interaction terms (e.g., `a*b` or `a:b`). This prevents dimension dropping or row matching errors during formatting.
+* **New:** `glmshow.display` now correctly preserves the `offset` term (e.g., `offset(log(n))`) when calculating crude estimates. This ensures statistically accurate univariate results for Poisson and other GLM models by maintaining the same exposure baseline.
 
 # jstable 1.3.23
 * Fix: `svyregress.display` no longer errors when `pcut.univariate` selects a single variable (prevents dimension dropping).
